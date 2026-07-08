@@ -37,15 +37,31 @@ async def analyze(file: UploadFile = File(...)):
             io.BytesIO(image_bytes)
         )
         prompt = """
-Analyze this workplace image.
-Create a complete workplace risk assessment according to the Nohl method.
-Tasks:
-- Identify visible hazards
-- Explain causes
-- Describe consequences
-- Recommend mitigation measures
-Return ONLY clean HTML.
+Analysiere dieses Arbeitsplatzbild.
+Erstelle eine vollständige Gefährdungsbeurteilung nach der Nohl-Methode.
+Berücksichtige dabei:
+- sichtbare Gefahren
+- Ursachen
+- mögliche Folgen
+- Maßnahmen zur Risikominimierung
+Ordne die Risiken passenden Gefährdungskategorien zu.
+Erstelle:
+- Überschriften
+- Tabellen
+- Aufzählungen
+Gib ausschließlich sauberes HTML zurück.
+Verwende kein Markdown.
 """
+        #prompt = """
+#Analyze this workplace image.
+#Create a complete workplace risk assessment according to the Nohl method.
+#Tasks:
+#- Identify visible hazards
+#- Explain causes
+#- Describe consequences
+#- Recommend mitigation measures
+#Return ONLY clean HTML.
+#"""
         # Gemini Vision aufrufen
         response = model.generate_content(
             [prompt, image]

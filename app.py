@@ -5,26 +5,20 @@ from PIL import Image
 import io
 import os
 app = FastAPI()
-# CORS erlauben für LimeSurvey
+# CORS erlauben
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# Gemini API Key aus Render Environment
+# Gemini API Key laden
 API_KEY = os.getenv("GEMINI_API_KEY")
 if not API_KEY:
     raise ValueError("GEMINI_API_KEY is missing")
 # Gemini konfigurieren
 genai.configure(api_key=API_KEY)
-# Modell auswählen
-model = genai.GenerativeModel(
-    "gemini-1.5-flash"
- ValueError("GEMINI_API_KEY is missing")
-# Gemini konfigurieren
-genai.configure(api_key=API_KEY)
-# Modell auswählen
+# Modell laden
 model = genai.GenerativeModel(
     "gemini-1.5-flash"
 )
@@ -36,30 +30,23 @@ def home():
 @app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
     try:
-        # Bild empfangen
+        # Bild lesen
         image_bytes = await file.read()
         # Bild öffnen
         image = Image.open(
             io.BytesIO(image_bytes)
         )
-        # Prompt
         prompt = """
 Analyze this workplace image.
 Create a complete workplace risk assessment according to the Nohl method.
 Tasks:
-- Identify all visible hazards
-- Categorize the hazards
-- Explain causes and consequences
+- Identify visible hazards
+- Explain causes
+- Describe consequences
 - Recommend mitigation measures
-- Summarize the main risks
 Return ONLY clean HTML.
-Use:
-- headings
-- bullet points
-- tables where appropriate
-Do not use Markdown.
 """
-        # Gemini Vision Request
+        # Gemini Vision aufrufen
         response = model.generate_content(
             [prompt, image]
         )
@@ -68,7 +55,6 @@ Do not use Markdown.
             "html": html
         }
     except Exception as e:
-        # Fehler direkt an LimeSurvey zurückgeben
         return {
             "html": f"""
             <h2>ERROR</h2>

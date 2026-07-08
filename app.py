@@ -20,7 +20,7 @@ if not API_KEY:
 genai.configure(api_key=API_KEY)
 # Modell laden
 model = genai.GenerativeModel(
-    "gemini-1.5-flash"
+    "gemini-2.0-flash"
 )
 @app.get("/")
 def home():

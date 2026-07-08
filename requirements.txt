@@ -1,6 +1,5 @@
 fastapi
 uvicorn
 python-multipart
-requests
-ibm-watsonx-ai
+google-generativeai
 Pillow

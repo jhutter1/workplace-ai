@@ -36,21 +36,26 @@ async def analyze(file: UploadFile = File(...)):
         image = Image.open(
             io.BytesIO(image_bytes)
         )
-        prompt = """
+       prompt = """
+WICHTIG:
+Antworte ausschließlich auf Deutsch.
+Verwende keine englischen Begriffe.
+Die komplette Antwort muss in deutscher Sprache sein.
 Analysiere dieses Arbeitsplatzbild.
 Erstelle eine vollständige Gefährdungsbeurteilung nach der Nohl-Methode.
-Berücksichtige dabei:
+Berücksichtige:
 - sichtbare Gefahren
 - Ursachen
 - mögliche Folgen
 - Maßnahmen zur Risikominimierung
 Ordne die Risiken passenden Gefährdungskategorien zu.
-Erstelle:
-- Überschriften
-- Tabellen
-- Aufzählungen
+Die Ausgabe soll professionell und strukturiert sein.
+Verwende:
+- HTML Überschriften
+- HTML Tabellen
+- HTML Listen
 Gib ausschließlich sauberes HTML zurück.
-Verwende kein Markdown.
+Verwende KEIN Markdown.
 """
         #prompt = """
 #Analyze this workplace image.

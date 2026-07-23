@@ -1,0 +1,140 @@
+<h3>Here you can upload a photo of your workspace and start the AI. (Result will be in German.)</h3>
+<input accept="imageUpload" capture="environment" id="imageUpload" type="file" /><br /><br /><img id="preview" style="max-width:500px; display:none; border:1px solid #ccc; padding:10px;" /><br /><br /><button onclick="analyzeImage()" type="button">Start Analysis</button>
+
+<div id="loading"> </div>
+
+<div id="result"> </div>
+<script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.2/dist/browser-image-compression.js"></script> <script>
+const imageUpload =
+  document.getElementById("imageUpload");
+const preview =
+  document.getElementById("preview");
+let compressedFile = null;
+/* Bild auswählen */
+imageUpload.addEventListener(
+  "change",
+  async (event) => {
+    const file =
+      event.target.files[0];
+    if (!file) return;
+    try {
+      document.getElementById(
+        "loading"
+      ).innerHTML =
+        "Bild wird optimiert ...";
+      /* Bild komprimieren */
+      compressedFile =
+        await imageCompression(
+          file,
+          {
+            maxSizeMB: 1,
+            maxWidthOrHeight: 1200,
+            useWebWorker: true
+          }
+        );
+      /* Vorschau */
+      preview.src =
+        URL.createObjectURL(
+          compressedFile
+        );
+      preview.style.display =
+        "block";
+      document.getElementById(
+        "loading"
+      ).innerHTML = "";
+      console.log(
+        "Original:",
+        (file.size / 1024 / 1024).toFixed(2),
+        "MB"
+      );
+      console.log(
+        "Komprimiert:",
+        (
+          compressedFile.size /
+          1024 /
+          1024
+        ).toFixed(2),
+        "MB"
+      );
+    } catch (error) {
+      console.error(error);
+      document.getElementById(
+        "loading"
+      ).innerHTML = "";
+      alert(
+        "Bild konnte nicht verarbeitet werden."
+      );
+    }
+  }
+);
+/* Analyse starten */
+async function analyzeImage() {
+  if (!compressedFile) {
+    alert(
+      "Bitte zuerst ein Bild auswählen."
+    );
+    return;
+  }
+  const formData =
+    new FormData();
+  formData.append(
+    "file",
+    compressedFile
+  );
+  document.getElementById(
+    "loading"
+  ).innerHTML =
+    "Analysis is running ...it might take some few seconds.";
+  try {
+    const response =
+      await fetch(
+        "http://localhost:8000/analyze",
+        {
+          method: "POST",
+          body: formData
+        }
+      );
+    if (!response.ok) {
+      throw new Error("Serverfehler");
+    }
+    const data =
+      await response.json();
+    document.getElementById(
+      "loading"
+    ).innerHTML = "";
+    document.getElementById(
+      "result"
+    ).innerHTML =
+      data.html;
+    /* LimeSurvey speichern */
+    const textarea =
+      document.querySelector(
+        "textarea"
+      );
+    if (textarea) {
+      textarea.value =
+        data.html;
+      textarea.dispatchEvent(
+        new Event(
+          "input",
+          { bubbles: true }
+        )
+      );
+      textarea.dispatchEvent(
+        new Event(
+          "change",
+          { bubbles: true }
+        )
+      );
+    }
+  } catch (error) {
+    console.error(error);
+    document.getElementById(
+      "loading"
+    ).innerHTML = "";
+    alert(
+      "Analyse konnte nicht abgeschlossen werden."
+    );
+  }
+}
+</script>

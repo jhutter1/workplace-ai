@@ -22,7 +22,7 @@ app = FastAPI(title="outpredict KI-Risikoanalyse")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["POST", "GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -31,24 +31,24 @@ API_KEY = os.getenv("GEMINI_API_KEY")
 if not API_KEY:
     raise RuntimeError("GEMINI_API_KEY is missing")
 
+# Gemini-Modell
 GEMINI_MODEL = "gemini-2.5-flash"
 
-# Maximale Dateigroesse: 1 MB
-# LimeSurvey komprimiert bereits auf ca. 0,5 MB.
+# Maximale Bildgroesse: 1 MB
 MAX_UPLOAD_BYTES = 1024 * 1024
 
-# Maximale Wartezeit auf Gemini
+# Maximale Dauer der KI-Anfrage
 AI_TIMEOUT = 110
 
-# Maximal eine gleichzeitige KI-Analyse
+# Nur eine Analyse gleichzeitig pro Serverprozess
 analysis_lock = asyncio.Semaphore(1)
 
-# Aktueller Google Gemini Client
+# Google Gemini Client
 client = genai.Client(api_key=API_KEY)
 
 
 # ==========================================
-# STARTSEITE / HEALTH CHECK
+# HEALTH CHECK
 # ==========================================
 
 @app.get("/")
@@ -66,16 +66,14 @@ async def health():
 
 
 # ==========================================
-# BILDTYP PRUEFEN
+# BILDFORMAT PRUEFEN
 # ==========================================
 
 def detect_image_type(data: bytes) -> str:
 
-    # JPEG
     if data.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
 
-    # PNG
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
 
@@ -89,51 +87,82 @@ def detect_image_type(data: bytes) -> str:
 
 
 # ==========================================
-# PROMPT FUER GEFAEHRDUNGSBEURTEILUNG
+# ORIGINALER ANALYSEAUFTRAG
 # ==========================================
 
 PROMPT = """
 WICHTIG:
-Antworte ausschliesslich auf Deutsch.
+Antworte ausschließlich auf Deutsch.
 
 Analysiere dieses Arbeitsplatzbild.
 
-Erstelle eine vollstaendige Gefaehrdungsbeurteilung
-nach der Nohl-Methode auf Grundlage der
-sichtbaren Bildinformationen.
+Erstelle eine vollständige Gefährdungsbeurteilung
+nach der Nohl-Methode.
 
-Beruecksichtige:
-
+Berücksichtige dabei:
 - sichtbare Gefahren
 - Ursachen
-- moegliche Folgen
-- Massnahmen zur Risikominimierung
+- mögliche Folgen
+- Maßnahmen zur Risikominimierung
 
 Ordne die Risiken passenden
-Gefaehrdungskategorien zu.
+Gefährdungskategorien zu.
 
-Unterscheide dabei zwischen:
+Erstelle:
+- Überschriften
+- Tabellen
+- Aufzählungen
 
-1. Im Bild erkennbaren Gefaehrdungen
-2. Vermuteten Gefaehrdungen
-3. Sachverhalten, die vor Ort geprueft
-   werden muessen
+Die Ausgabe soll professionell,
+ausführlich und strukturiert sein.
 
-Erfinde keine nicht erkennbaren
-technischen oder organisatorischen Fakten.
-
-Erstelle eine professionelle und
-strukturierte Darstellung mit:
-
-- HTML-Ueberschriften
-- HTML-Tabellen
-- HTML-Aufzaehlungen
-
-Gib ausschliesslich sauberes HTML zurueck.
-
+Gib ausschließlich sauberes HTML zurück.
 Verwende kein Markdown.
-Verwende keine HTML-Codebloecke.
 """
+
+
+# ==========================================
+# GEMINI-ANTWORT PRUEFEN
+# ==========================================
+
+def check_finish_reason(response):
+
+    if not response.candidates:
+        raise HTTPException(
+            status_code=502,
+            detail="Gemini hat keine Antwort geliefert."
+        )
+
+    candidate = response.candidates[0]
+    reason = candidate.finish_reason
+
+    if reason is None:
+        return
+
+    reason_name = getattr(reason, "name", str(reason))
+
+    logger.info(
+        "Gemini Finish Reason: %s",
+        reason_name
+    )
+
+    if reason_name == "MAX_TOKENS":
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Die Gefaehrdungsbeurteilung wurde "
+                "wegen des Tokenlimits abgeschnitten."
+            )
+        )
+
+    if reason_name != "STOP":
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Gemini konnte die Antwort nicht "
+                "vollstaendig abschliessen."
+            )
+        )
 
 
 # ==========================================
@@ -152,7 +181,7 @@ async def analyze(file: UploadFile = File(...)):
     )
 
     # --------------------------------------
-    # PHASE 1: DATEI LADEN
+    # PHASE 1: DATEI LESEN
     # --------------------------------------
 
     try:
@@ -170,7 +199,7 @@ async def analyze(file: UploadFile = File(...)):
 
     if len(image_bytes) > MAX_UPLOAD_BYTES:
         logger.warning(
-            "[%s] Datei zu gross: %d Bytes",
+            "[%s] Bild zu gross: %d Bytes",
             request_id,
             len(image_bytes)
         )
@@ -179,12 +208,12 @@ async def analyze(file: UploadFile = File(...)):
             status_code=413,
             detail=(
                 "Bild zu gross. "
-                "Bitte maximal 1 MB hochladen."
+                "Maximal 1 MB erlaubt."
             )
         )
 
     # --------------------------------------
-    # PHASE 2: BILD PRUEFEN
+    # PHASE 2: BILDTYP PRUEFEN
     # --------------------------------------
 
     mime_type = detect_image_type(image_bytes)
@@ -196,9 +225,8 @@ async def analyze(file: UploadFile = File(...)):
         mime_type
     )
 
-    # Keine Bilddekodierung mit Pillow.
-    # Die komprimierten Daten gehen
-    # direkt an Gemini.
+    # Keine Bildverarbeitung mit Pillow
+    # Komprimiertes Bild direkt an Gemini
 
     image_part = types.Part.from_bytes(
         data=image_bytes,
@@ -208,33 +236,36 @@ async def analyze(file: UploadFile = File(...)):
     del image_bytes
 
     # --------------------------------------
-    # PHASE 3: GEMINI ANALYSE
+    # PHASE 3: ANALYSEPLATZ RESERVIEREN
     # --------------------------------------
-
-    # Wenn bereits eine Analyse laeuft,
-    # maximal 10 Sekunden warten.
 
     try:
         await asyncio.wait_for(
             analysis_lock.acquire(),
             timeout=10
         )
+
     except asyncio.TimeoutError:
         raise HTTPException(
             status_code=503,
             detail=(
-                "Der KI-Server ist beschaeftigt. "
+                "Der KI-Server ist derzeit beschaeftigt. "
                 "Bitte erneut versuchen."
             )
         )
 
     try:
+
         logger.info(
             "[%s] Gemini-Analyse startet",
             request_id
         )
 
         ai_start = time.monotonic()
+
+        # ----------------------------------
+        # PHASE 4: GEMINI AUFRUFEN
+        # ----------------------------------
 
         try:
             response = await asyncio.wait_for(
@@ -246,13 +277,17 @@ async def analyze(file: UploadFile = File(...)):
                     ],
                     config=types.GenerateContentConfig(
                         temperature=0.3,
-                        max_output_tokens=4096
+                        max_output_tokens=8192,
+                        thinking_config=types.ThinkingConfig(
+                            thinking_budget=1024
+                        )
                     )
                 ),
                 timeout=AI_TIMEOUT
             )
 
         except asyncio.TimeoutError:
+
             logger.error(
                 "[%s] Gemini Timeout",
                 request_id
@@ -261,8 +296,8 @@ async def analyze(file: UploadFile = File(...)):
             raise HTTPException(
                 status_code=504,
                 detail=(
-                    "Die KI-Analyse hat zu lange "
-                    "gedauert. Bitte erneut versuchen."
+                    "Die KI-Analyse hat zu lange gedauert. "
+                    "Bitte erneut versuchen."
                 )
             )
 
@@ -275,8 +310,10 @@ async def analyze(file: UploadFile = File(...)):
         )
 
         # ----------------------------------
-        # PHASE 4: ERGEBNIS
+        # PHASE 5: ANTWORT PRUEFEN
         # ----------------------------------
+
+        check_finish_reason(response)
 
         html = response.text
 
@@ -289,6 +326,22 @@ async def analyze(file: UploadFile = File(...)):
                 )
             )
 
+        # Falls Gemini trotzdem Markdown-Fences
+        # zurueckgibt, diese entfernen.
+        html = html.strip()
+
+        if html.startswith("```html"):
+            html = html[7:].strip()
+        elif html.startswith("```"):
+            html = html[3:].strip()
+
+        if html.endswith("```"):
+            html = html[:-3].strip()
+
+        # ----------------------------------
+        # PHASE 6: ERGEBNIS ZURUECKGEBEN
+        # ----------------------------------
+
         total_duration = (
             time.monotonic() - start_time
         )
@@ -299,7 +352,12 @@ async def analyze(file: UploadFile = File(...)):
             total_duration
         )
 
-        # Kompatibel zum LimeSurvey Frontend
+        logger.info(
+            "[%s] HTML-Laenge: %d Zeichen",
+            request_id,
+            len(html)
+        )
+
         return {
             "html": html
         }
@@ -308,8 +366,9 @@ async def analyze(file: UploadFile = File(...)):
         raise
 
     except Exception:
+
         logger.exception(
-            "[%s] Fehler bei Gemini",
+            "[%s] Fehler bei der KI-Analyse",
             request_id
         )
 

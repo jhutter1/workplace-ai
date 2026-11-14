@@ -44,7 +44,13 @@ AI_TIMEOUT = 110
 analysis_lock = asyncio.Semaphore(1)
 
 # Google Gemini Client
-client = genai.Client(api_key=API_KEY)
+client = genai.Client(
+    api_key=API_KEY,
+    http_options=types.HttpOptions(
+        api_version="v1beta"
+    )
+)
+
 
 
 # ==========================================
